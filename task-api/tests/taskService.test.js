@@ -252,3 +252,111 @@ describe('PATCH /tasks/:id/complete', () => {
     expect(res.status).toBe(404);
   });
 });
+
+//adding this test for the new created route
+describe('PATCH /tasks/:id/assign', () => {
+  it('assigns a task to a valid assignee', async () => {
+    const { body: created } = await createTask({ title: 'Task to assign' });
+ 
+    const res = await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({ assignee: 'Alice' });
+ 
+    expect(res.status).toBe(200);
+    expect(res.body.assignee).toBe('Alice');
+    expect(res.body.id).toBe(created.id); // other fields unchanged
+    expect(res.body.title).toBe('Task to assign');
+  });
+ 
+  it('trims whitespace from assignee name', async () => {
+    const { body: created } = await createTask();
+ 
+    const res = await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({ assignee: '  Bob  ' });
+ 
+    expect(res.status).toBe(200);
+    expect(res.body.assignee).toBe('Bob');
+  });
+ 
+  it('allows reassigning a task that is already assigned', async () => {
+    const { body: created } = await createTask();
+ 
+    await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({ assignee: 'Alice' });
+ 
+    const res = await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({ assignee: 'Bob' });
+ 
+    expect(res.status).toBe(200);
+    expect(res.body.assignee).toBe('Bob');
+  });
+ 
+  it('returns 404 for an unknown task id', async () => {
+    const res = await request(app)
+      .patch('/tasks/ghost-id/assign')
+      .send({ assignee: 'Alice' });
+ 
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+ 
+  it('returns 400 when assignee is missing', async () => {
+    const { body: created } = await createTask();
+ 
+    const res = await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({});
+ 
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/assignee/i);
+  });
+ 
+  it('returns 400 when assignee is an empty string', async () => {
+    const { body: created } = await createTask();
+ 
+    const res = await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({ assignee: '' });
+ 
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/assignee/i);
+  });
+ 
+  it('returns 400 when assignee is a whitespace-only string', async () => {
+    const { body: created } = await createTask();
+ 
+    const res = await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({ assignee: '   ' });
+ 
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/assignee/i);
+  });
+ 
+  it('returns 400 when assignee is not a string', async () => {
+    const { body: created } = await createTask();
+ 
+    const res = await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({ assignee: 123 });
+ 
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/assignee/i);
+  });
+ 
+  it('persists the assignee — GET /tasks/:id reflects the assignment', async () => {
+    const { body: created } = await createTask();
+ 
+    await request(app)
+      .patch(`/tasks/${created.id}/assign`)
+      .send({ assignee: 'Alice' });
+ 
+    const res = await request(app).get(`/tasks/${created.id}`);
+ 
+    expect(res.status).toBe(200);
+    expect(res.body.assignee).toBe('Alice');
+  });
+});
