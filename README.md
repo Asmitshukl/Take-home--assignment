@@ -1,113 +1,91 @@
-# Take-Home Assignment — The Untested API
+# Day 1 — Read and fixed
 
-A 2-day take-home assignment. You'll read unfamiliar code, write tests, track down bugs, and ship a small feature.
+## What I Did
 
-Read **[ASSIGNMENT.md](./ASSIGNMENT.md)** for the full brief before you start.
+Read through the full codebase in `src/` to understand the structure before writing any tests:
 
----
+- `src/app.js` — Express app setup, error handler middleware
+- `src/routes/tasks.js` — All route handlers
+- `src/services/taskService.js` — In-memory store with all business logic
+- `src/utils/validators.js` — Input validation for create and update
 
-## A note on AI tools
+Then wrote two test files in `tests/`:
 
-You're welcome to use AI tools. What we're evaluating is your ability to read and reason about unfamiliar code — so your submission should reflect your own understanding, not just generated output.
-
-Concretely:
-- For each bug you report: include where in the code it lives and why it happens
-- For the feature you implement: briefly explain the design decisions you made
-- If something surprised you or you had to make a tradeoff, say so
-
----
-
-## Getting Started
-
-**Prerequisites:** Node.js 18+
-
-```bash
-cd task-api
-npm install
-npm start        # runs on http://localhost:3000
-```
-
-**Tests:**
-
-```bash
-npm test           # run test suite
-npm run coverage   # run with coverage report
-```
+| File | Type | Tests |
+|------|------|-------|
+| `taskService.unit.test.js` | Unit | Calls `taskService.js` functions directly |
+| `taskService.test.js` | Integration | HTTP requests via Supertest against the full Express app |
 
 ---
 
-## Project Structure
+## Test Coverage
 
-```
-task-api/
-  src/
-    app.js                  # Express app setup
-    routes/tasks.js         # Route handlers
-    services/taskService.js # Business logic + in-memory data store
-    utils/validators.js     # Input validation helpers
-  tests/                    # Your tests go here
-  package.json
-  jest.config.js
-ASSIGNMENT.md               # Full brief — read this first
-```
+![Coverage Output](./screenshots/Screenshot%20from%202026-04-01%2012-17-26.png)
 
-> The data store is in-memory. It resets every time the server restarts.
+**53 tests, 2 test suites, all passing.**
+
+### Uncovered lines — explained
+
+| File | Lines | Reason |
+|------|-------|--------|
+| `app.js` | 10-11, 17-18 | `app.listen()` and global error handler — only run in production, not in test |
+| `tasks.js` | 21 | Minor branch in `GET /stats` |
+| `taskService.js` | 22 | `getStats` short-circuit when task has no `dueDate` at all |
+| `validators.js` | 28, 31 | `dueDate` validation branch in `validateUpdateTask` |
+
+None of these are meaningful gaps — all core logic and every route are fully covered.
 
 ---
 
-## API Reference
+## Bugs Found
 
-| Method   | Path                      | Description                              |
-|----------|---------------------------|------------------------------------------|
-| `GET`    | `/tasks`                  | List all tasks. Supports `?status=`, `?page=`, `?limit=` |
-| `POST`   | `/tasks`                  | Create a new task                        |
-| `PUT`    | `/tasks/:id`              | Full update of a task                    |
-| `DELETE` | `/tasks/:id`              | Delete a task (returns 204)              |
-| `PATCH`  | `/tasks/:id/complete`     | Mark a task as complete                  |
-| `GET`    | `/tasks/stats`            | Counts by status + overdue count         |
-| `PATCH`  | `/tasks/:id/assign`       | **Assign a task to a user** _(to implement)_ |
+### Bug 1 — `GET /tasks/:id` route missing
 
-### Task shape
+The route simply did not exist in `tasks.js`. Any request to `/tasks/:id` fell through to a 404. Discovered by writing the integration test for it — the test immediately failed with 404 even for a task that had just been created.
 
-```json
-{
-  "id": "uuid",
-  "title": "string",
-  "description": "string",
-  "status": "pending | in-progress | completed",
-  "priority": "low | medium | high",
-  "dueDate": "ISO 8601 or null",
-  "completedAt": "ISO 8601 or null",
-  "createdAt": "ISO 8601"
-}
+**Fix:** Added the missing route handler:
+
+```js
+router.get('/:id', (req, res) => {
+  const task = taskService.findById(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  res.json(task);
+});
 ```
 
-### Sample requests
+> **Note:** This route must be declared **after** `router.get('/stats', ...)` — otherwise Express matches `/stats` as an `:id` param and the stats endpoint breaks.
 
-**Create a task**
-```bash
-curl -X POST http://localhost:3000/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Write tests", "priority": "high"}'
+---
+
+### Bug 2 — Pagination off-by-one (1-indexed route, 0-indexed service)
+
+The route defaulted `page` to `1`:
+
+```js
+const pageNum = parseInt(page) || 1;
 ```
 
-**List tasks with filter**
-```bash
-curl "http://localhost:3000/tasks?status=pending&page=1&limit=10"
+But `getPaginated` in the service is 0-indexed:
+
+```js
+const offset = page * limit; // page=1, limit=10 → skips first 10 items
 ```
 
-**Mark complete**
-```bash
-curl -X PATCH http://localhost:3000/tasks/<id>/complete
+So `GET /tasks?page=1&limit=10` skipped the first page entirely. Page 0 returned nothing because `parseInt('0') || 1` evaluates to `1` due to `0` being falsy.
+
+**Fix:**
+
+```js
+const pageNum = parseInt(page) ?? 0;  // or: page !== undefined ? parseInt(page) : 0
 ```
 
 ---
 
-## What to Submit
+## How to Run
 
-See [ASSIGNMENT.md](./ASSIGNMENT.md) for full submission requirements. At minimum, include:
+```bash
+npm test         # run all tests
+npm run coverage # run tests + coverage report
+```
 
-- **Test files** — covering the endpoints and edge cases you identified
-- **Bug report** — what you found, where in the code, and why it's a bug (not just symptoms)
-- **At least one fix** — with a note on your approach
-- **`PATCH /tasks/:id/assign` implementation** — plus a short explanation of any design decisions (validation, edge cases, etc.)
+State is in-memory — resets on every test run automatically via `taskService._reset()` called in `beforeEach`.
